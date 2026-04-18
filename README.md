@@ -72,4 +72,6 @@ The classic MNIST dataset for classifying handwritten digits (0-9).
 
 Achieved Test Accuracy: 0.8346 (Cost: 0.8359729594421659)
 
+Note: The dataset is not included as the file is too big.
+
 ![MNIST Cost](./playground/plotters-doc-data/mnist-cost.png)
