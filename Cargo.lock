@@ -584,6 +584,7 @@ dependencies = [
  "matrix",
  "neural-network",
  "plotters",
+ "rand",
 ]
 
 [[package]]

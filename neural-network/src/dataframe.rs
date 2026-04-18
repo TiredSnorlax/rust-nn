@@ -12,6 +12,7 @@ pub enum DataType {
     Binary(f64),
     OneHot(Vec<f64>),
     Continuous(f64),
+    String(String),
 }
 
 impl Display for DataType {
@@ -22,41 +23,47 @@ impl Display for DataType {
                 write!(f, "OH({})", items.iter().position(|x| *x == 1.).unwrap())
             }
             DataType::Continuous(v) => write!(f, "F({})", v),
+            DataType::String(s) => write!(f, "S({})", s),
         }
     }
 }
 
 impl DataType {
-    pub fn into_vec(&self) -> Vec<f64> {
+    pub fn into_vec(&self) -> Result<Vec<f64>, Box<dyn Error>> {
         match self {
-            DataType::Binary(v) => vec![*v],
-            DataType::OneHot(items) => items.clone(),
-            DataType::Continuous(v) => vec![*v],
+            DataType::Binary(v) => Ok(vec![*v]),
+            DataType::OneHot(items) => Ok(items.clone()),
+            DataType::Continuous(v) => Ok(vec![*v]),
+            DataType::String(_) => Err("Unable to convert string into float values".into()),
         }
     }
 }
 
+#[derive(Debug, PartialEq, Clone)]
 pub enum FeatureTypes<'a> {
     // first string for 0, second string for 1
     Binary(&'a str, &'a str),
     // number of categories
     OneHot(usize, Vec<&'a str>),
     Continuous,
+    String,
 }
 
 pub struct Dataframe {
-    features: Vec<Vec<DataType>>,
-    feature_names: Vec<String>,
-    targets: Vec<DataType>,
-    target_name: String,
+    pub features: Vec<Vec<DataType>>,
+    pub feature_names: Vec<String>,
+    pub targets: Vec<DataType>,
+    pub target_name: String,
 }
 
 impl Dataframe {
-    pub fn from_csv_file(
+    pub fn from_file(
         file_path: &str,
         names: Vec<&str>,
         target_index: usize,
         feature_types: Vec<FeatureTypes>,
+        sep: &str,
+        drop_unknown: bool,
     ) -> Result<Self, Box<dyn Error>> {
         let file = File::open(file_path)?;
         let reader = BufReader::new(file);
@@ -66,12 +73,22 @@ impl Dataframe {
         let mut rows: Vec<Vec<DataType>> = Vec::new();
         let mut targets: Vec<DataType> = Vec::new();
 
-        for line in reader.lines() {
+        'outer: for line in reader.lines() {
             let line = line?;
-            let strings: Vec<String> = line.split(",").map(|s| s.to_string()).collect();
+            let strings: Vec<String> = match sep {
+                " " => line.split_whitespace().map(|s| s.to_string()).collect(),
+                _ => line.split(sep).map(|s| s.to_string()).collect(),
+            };
             let mut row: Vec<DataType> = Vec::with_capacity(names.len());
-            for (i, val) in strings.iter().enumerate() {
-                row.push(Self::convert_to_feature(&feature_types[i], val, &names[i])?);
+            for i in 0..names.len() {
+                let res = Self::convert_to_feature(&feature_types[i], &strings[i], &names[i]);
+                if res.is_err() && drop_unknown {
+                    continue 'outer;
+                } else if res.is_err() && !drop_unknown {
+                    return Err(res.unwrap_err());
+                } else {
+                    row.push(res.unwrap())
+                }
             }
 
             let target = row.swap_remove(target_index);
@@ -87,6 +104,13 @@ impl Dataframe {
             feature_names: names,
             target_name,
         })
+    }
+
+    pub fn drop_col(&mut self, col_index: usize) {
+        for row in &mut self.features {
+            row.remove(col_index);
+        }
+        self.feature_names.remove(col_index);
     }
 
     fn convert_to_feature(
@@ -129,6 +153,7 @@ impl Dataframe {
                     ).into());
                 }
             }
+            FeatureTypes::String => DataType::String(data.to_string()),
         };
 
         Ok(data_type)
@@ -153,23 +178,41 @@ impl Dataframe {
         )
     }
 
-    /// Split dataframe into 2 dataframes by ratio.
+    /// Split dataframe into 2 dataframes by ratio using random sampling.
     pub fn split(&self, ratio: f64) -> (Self, Self) {
+        use rand::seq::SliceRandom;
+        let mut indices: Vec<usize> = (0..self.features.len()).collect();
+        let mut rng = rand::rng();
+        indices.shuffle(&mut rng);
+
         let split_index = (self.features.len() as f64 * ratio) as usize;
-        let (f_top, f_bot) = self.features.split_at(split_index);
-        let (t_top, t_bot) = self.targets.split_at(split_index);
+        let (indices1, indices2) = indices.split_at(split_index);
+
+        let mut f1 = Vec::with_capacity(indices1.len());
+        let mut t1 = Vec::with_capacity(indices1.len());
+        for &i in indices1 {
+            f1.push(self.features[i].clone());
+            t1.push(self.targets[i].clone());
+        }
+
+        let mut f2 = Vec::with_capacity(indices2.len());
+        let mut t2 = Vec::with_capacity(indices2.len());
+        for &i in indices2 {
+            f2.push(self.features[i].clone());
+            t2.push(self.targets[i].clone());
+        }
 
         (
             Self {
-                features: f_top.to_vec(),
+                features: f1,
                 feature_names: self.feature_names.clone(),
-                targets: t_top.to_vec(),
+                targets: t1,
                 target_name: self.target_name.clone(),
             },
             Self {
-                features: f_bot.to_vec(),
+                features: f2,
                 feature_names: self.feature_names.clone(),
-                targets: t_bot.to_vec(),
+                targets: t2,
                 target_name: self.target_name.clone(),
             },
         )
@@ -205,18 +248,21 @@ impl Dataframe {
 
     /// This will return a 2 Matrices, inputs and targets.
     /// Matrix of shape (number of examples, number of features)
-    pub fn convert_to_matrix(&self) -> (Matrix, Matrix) {
+    pub fn convert_to_matrix(&self) -> Result<(Matrix, Matrix), Box<dyn Error>> {
         // Inputs
         let mut input_data: Vec<f64> = Vec::new();
         for row in &self.features {
-            input_data.extend(row.iter().map(|f| f.into_vec()).flatten());
+            input_data.extend(row.iter().map(|f| f.into_vec().unwrap()).flatten());
         }
 
         // This will account for the one-hot encoding increasing the length.
         let input_cols = if self.features.is_empty() {
             0
         } else {
-            self.features[0].iter().map(|f| f.into_vec().len()).sum()
+            self.features[0]
+                .iter()
+                .map(|f| f.into_vec().unwrap().len())
+                .sum()
         };
 
         let inputs = Matrix::from(self.features.len(), input_cols, input_data);
@@ -225,17 +271,17 @@ impl Dataframe {
         let mut target_data: Vec<f64> = Vec::new();
 
         for target in &self.targets {
-            target_data.extend(target.into_vec());
+            target_data.extend(target.into_vec().unwrap());
         }
         let target_cols = if self.targets.is_empty() {
             0
         } else {
-            self.targets[0].into_vec().len()
+            self.targets[0].into_vec()?.len()
         };
 
         let targets = Matrix::from(self.targets.len(), target_cols, target_data);
 
-        (inputs, targets)
+        Ok((inputs, targets))
     }
 }
 
@@ -293,7 +339,7 @@ mod tests {
             target_name: "target".to_string(),
         };
 
-        let (input, target) = df.convert_to_matrix();
+        let (input, target) = df.convert_to_matrix().unwrap();
         assert_eq!(input.rows, 2);
         assert_eq!(input.cols, 5); // 1 (cont) + 1 (binary) + 3 (one-hot)
         assert_eq!(
@@ -317,9 +363,9 @@ mod tests {
         let targets: Vec<DataType> = (0..10).map(|i| DataType::Continuous(i as f64)).collect();
 
         let df = Dataframe {
-            features,
+            features: features.clone(),
             feature_names: vec!["f1".to_string()],
-            targets,
+            targets: targets.clone(),
             target_name: "target".to_string(),
         };
 
@@ -328,10 +374,17 @@ mod tests {
         assert_eq!(df1.features.len(), 7);
         assert_eq!(df2.features.len(), 3);
 
-        assert_eq!(df1.features[0][0], DataType::Continuous(0.0));
-        assert_eq!(df1.features[6][0], DataType::Continuous(6.0));
-        assert_eq!(df2.features[0][0], DataType::Continuous(7.0));
-        assert_eq!(df2.features[2][0], DataType::Continuous(9.0));
+        // Check all original values are still present
+        let mut combined_features = df1.features.clone();
+        combined_features.extend(df2.features.clone());
+        combined_features.sort_by(|a, b| {
+            if let (DataType::Continuous(v1), DataType::Continuous(v2)) = (&a[0], &b[0]) {
+                v1.partial_cmp(v2).unwrap()
+            } else {
+                std::cmp::Ordering::Equal
+            }
+        });
+        assert_eq!(combined_features, features);
     }
 
     #[test]
@@ -358,5 +411,41 @@ mod tests {
         assert_eq!(batches[0].features[0][0], DataType::Continuous(0.0));
         assert_eq!(batches[1].features[0][0], DataType::Continuous(2.0));
         assert_eq!(batches[2].features[0][0], DataType::Continuous(4.0));
+    }
+
+    #[test]
+    fn test_from_file_unknown_values() -> Result<(), Box<dyn Error>> {
+        use std::fs;
+        let file_path = "test_unknown.csv";
+        let content = "1.0,red,yes\nbad_val,blue,no\n2.0,green,yes\n3.0,bad_cat,no";
+        fs::write(file_path, content)?;
+
+        let names = vec!["f1", "f2", "target"];
+        let feature_types = vec![
+            FeatureTypes::Continuous,
+            FeatureTypes::OneHot(3, vec!["red", "green", "blue"]),
+            FeatureTypes::Binary("no", "yes"),
+        ];
+
+        // Case 1: drop_unknown = true
+        let df_dropped = Dataframe::from_file(
+            file_path,
+            names.clone(),
+            2,
+            feature_types.clone(),
+            ",",
+            true,
+        )?;
+        // Should have only 2 rows (row 0 and row 2)
+        assert_eq!(df_dropped.features.len(), 2);
+        assert_eq!(df_dropped.features[0][0], DataType::Continuous(1.0));
+        assert_eq!(df_dropped.features[1][0], DataType::Continuous(2.0));
+
+        // Case 2: drop_unknown = false
+        let df_error = Dataframe::from_file(file_path, names, 2, feature_types, ",", false);
+        assert!(df_error.is_err());
+
+        fs::remove_file(file_path)?;
+        Ok(())
     }
 }

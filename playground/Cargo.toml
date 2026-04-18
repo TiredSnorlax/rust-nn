@@ -7,3 +7,4 @@ edition = "2024"
 matrix = { path = "../matrix" }
 neural-network = { path = "../neural-network" }
 plotters = "0.3.7"
+rand = "0.10.1"

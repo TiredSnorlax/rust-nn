@@ -77,23 +77,11 @@ impl NeuralNetwork {
             // Broadcast bias from shape (n_i, 1) to (n_i, m)
             let batch_size = z_weighted.shape().1;
             let b_broadcast = b.broadcast_cols(batch_size);
-            // let n_i = z_weighted.shape().0;
-            // let mut b_broadcast_data = Vec::with_capacity(n_i * batch_size);
-            // for row in 0..n_i {
-            //     for _ in 0..batch_size {
-            //         b_broadcast_data.push(b.data[row]);
-            //     }
-            // }
-            // let b_broadcast = Matrix {
-            //     rows: n_i,
-            //     cols: batch_size,
-            //     data: b_broadcast_data,
-            // };
 
             let z = z_weighted.add(&b_broadcast); // shape: (n_i, m)
             z_values.push(z.clone());
             let activation = &self.activations[i]; // shape: (n_i, m)
-            let a = z.map(activation.function);
+            let a = (activation.function)(&z);
             a_values.push(a.clone());
 
             values = a;
@@ -146,7 +134,7 @@ impl NeuralNetwork {
             // da_dz = g'(z)
             // dC_dz = dC_da * da_dz
             let dC_dz =
-                dC_da.multiply_elementwise(&z_values[w_i].map(self.activations[w_i].derivative)); // shape: (n_i, m)
+                dC_da.multiply_elementwise(&(self.activations[w_i].derivative)(&z_values[w_i])); // shape: (n_i, m)
 
             // dz_dw = a^(L - 1)
             let dz_dw = a_values[i - 1].clone(); // shape: (n_{i-1}, m)
@@ -198,20 +186,45 @@ impl NeuralNetwork {
     /// Returns a vector of costs for each epoch.
     pub fn train(
         &mut self,
-        inputs: Vec<Matrix>,
-        targets: Vec<Matrix>,
+        mut inputs: Vec<Matrix>,
+        mut targets: Vec<Matrix>,
         num_epochs: usize,
         learning_rate: f64,
-    ) -> Vec<f64> {
+        validation_split: f64,
+    ) -> (Vec<f64>, Vec<f64>) {
+        let validation_split_index = (inputs.len() as f64 * (1. - validation_split)) as usize;
+        let validation_inputs = inputs.split_off(validation_split_index);
+        let validation_targets = targets.split_off(validation_split_index);
+
+        // These will calculate for the training set only
         let num_batches = inputs.len();
         let update_interval = num_epochs / 10;
-        let mut history: Vec<f64> = Vec::with_capacity(num_epochs);
-        for i in 0..num_epochs {
-            let mut total_cost = 0.0;
 
+        let mut train_history: Vec<f64> = Vec::with_capacity(num_epochs);
+        let mut validation_history: Vec<f64> = Vec::with_capacity(num_epochs);
+
+        for i in 0..num_epochs {
+            // We run validation here first as after feeding the training data, gradient descent happens.
+            // This will cause an unfair comparison if we run validation after training.
+
+            // Validation
+            let mut validation_cost = 0.0;
+            for batch in 0..validation_inputs.len() {
+                let (outputs, _, _) = self.feed_forward(&validation_inputs[batch]);
+                let cost = self.cost(
+                    &outputs,
+                    &validation_targets[batch].transpose(),
+                    validation_inputs[batch].rows,
+                );
+                validation_cost += cost;
+            }
+            let validation_cost = validation_cost / validation_inputs.len() as f64;
+            validation_history.push(validation_cost);
+
+            let mut total_cost = 0.0;
             for batch in 0..num_batches {
                 let batch_size = inputs[batch].rows;
-                let (outputs, a_values, z_values) = self.feed_forward(&inputs[batch]);
+                let (outputs, a_values, z_values) = self.feed_forward(&inputs[batch]); // shape: (n, m)
                 let cost = self.cost(&outputs, &targets[batch].transpose(), batch_size);
                 total_cost += cost;
                 let (dc_dw, dc_db) =
@@ -220,30 +233,26 @@ impl NeuralNetwork {
                 self.gradient_descent(dc_dw, dc_db, learning_rate);
             }
             let total_cost = total_cost / num_batches as f64;
-
-            history.push(total_cost);
+            train_history.push(total_cost);
 
             if (i) % update_interval == 0 {
-                println!("Epoch: {} / {}, Cost: {}", i, num_epochs, total_cost);
+                println!(
+                    "Epoch: {} / {}, Training Cost: {}, Validation Cost: {}",
+                    i, num_epochs, total_cost, validation_cost
+                );
             }
         }
-        history
+        (train_history, validation_history)
     }
 
-    pub fn evaluate(&self, test_inputs: Matrix, test_targets: Matrix) {
+    pub fn evaluate(&self, test_inputs: Matrix, test_targets: Matrix) -> Matrix {
         let (outputs, _, _) = self.feed_forward(&test_inputs);
         let cost = self.cost(&outputs, &test_targets.transpose(), test_inputs.rows);
         println!("Test Cost: {}", cost);
-        let mut rng = rand::rng();
-        for _ in 0..10 {
-            // randomly sample
-            let i = rng.random_range(0..test_inputs.rows);
-            println!(
-                "Predicted: {}, Label: {}",
-                outputs.data[i],
-                test_targets.transpose().data[i]
-            )
-        }
+        // from (n, m) -> (m, n)
+        let outputs = outputs.transpose();
+
+        outputs
     }
 
     pub fn predict(&self, inputs: Matrix) -> Matrix {
@@ -462,7 +471,7 @@ mod tests {
         let mut nn = NeuralNetwork::new(vec![2, 3, 1], vec![RELU, SIGMOID], MSE);
 
         println!("\n=== AND Gate Test (batch_size=4) ===");
-        nn.train(batch_inputs.clone(), batch_targets.clone(), 800, 0.5);
+        nn.train(batch_inputs.clone(), batch_targets.clone(), 800, 0.5, 0.0);
 
         // Test all 4 combinations individually
         let test_cases = vec![
@@ -533,7 +542,7 @@ mod tests {
         let mut nn = NeuralNetwork::new(vec![2, 3, 1], vec![RELU, SIGMOID], MSE);
 
         println!("\n=== OR Gate Test (batch_size=4) ===");
-        nn.train(batch_inputs.clone(), batch_targets.clone(), 500, 0.5);
+        nn.train(batch_inputs.clone(), batch_targets.clone(), 500, 0.5, 0.0);
 
         // Test all 4 combinations individually
         let test_cases = vec![
@@ -603,7 +612,7 @@ mod tests {
         println!("Initial cost: {:.6}", initial_total_cost);
 
         // Train with mixed batch sizes (1 and 2)
-        nn.train(inputs.clone(), targets.clone(), 300, 0.1);
+        nn.train(inputs.clone(), targets.clone(), 300, 0.1, 0.0);
 
         // Calculate final cost
         let (final_out_0, _, _) = nn.feed_forward(&inputs[0]);
@@ -627,7 +636,7 @@ mod tests {
 
     #[test]
     fn test_train_or_gate_logistic() {
-        use crate::loss_functions::LOGISTIC;
+        use crate::loss_functions::BINARY_CROSSENTROPY;
 
         let batch_inputs = vec![create_matrix(
             4,
@@ -646,10 +655,10 @@ mod tests {
             ],
         )];
 
-        let mut nn = NeuralNetwork::new(vec![2, 3, 1], vec![RELU, SIGMOID], LOGISTIC);
+        let mut nn = NeuralNetwork::new(vec![2, 3, 1], vec![RELU, SIGMOID], BINARY_CROSSENTROPY);
 
         println!("\n=== OR Gate Test Logistic (batch_size=4) ===");
-        nn.train(batch_inputs.clone(), batch_targets.clone(), 500, 0.5);
+        nn.train(batch_inputs.clone(), batch_targets.clone(), 500, 0.5, 0.0);
 
         let test_cases = vec![
             (create_matrix(1, 2, vec![0.0, 0.0]), 0.0, "(0,0)"),

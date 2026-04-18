@@ -9,9 +9,8 @@ This is just a project for learning. There is no real/significant optimization i
 This workspace consists of three main crates:
 
 - **`matrix`**: A low-level linear algebra library providing the `Matrix` struct and essential operations.
-- **`neural-network`**: A high-level library for building, training, and evaluating neural networks.
-- **`playground`**: An example application demonstrating the use of both libraries, specifically applied to the Abalone dataset.
-
+- **`neural-network`**: A high-level library for building, training, and evaluating neural networks. This uses the matrix library.
+- **`playground`**: A collection of examples showcasing the neural network in different problems.
 The only dependency for **matrix** and **neural-network** is the **rand** crate.
 
 ## Features
@@ -41,33 +40,36 @@ The only dependency for **matrix** and **neural-network** is the **rand** crate.
   - One-hot encoding for categorical features.
   - Data splitting (train/test) and batching.
 
-### Usage Example
+## Examples
 
-```rust
-use matrix::matrix::Matrix;
-use neural_network::{
-    activations::{RELU, SIGMOID},
-    loss_functions::MSE,
-    nn::NeuralNetwork,
-};
+The `playground` crate contains several examples demonstrating the library's capabilities on real-world datasets.
 
-fn main() {
-    // Define a 2-3-1 network
-    let mut nn = NeuralNetwork::new(
-        vec![2, 3, 1], 
-        vec![RELU, SIGMOID], 
-        MSE
-    );
+### Abalone Age Prediction
+Predicts the age of abalone (number of rings) from physical measurements like length, diameter, and weight.
+- **Architecture**: `[10, 64, 64, 1]` with `RELU` and `LINEAR` activations.
+- **Loss Function**: `MSE` (Mean Squared Error).
+- **Preprocessing**: One-hot encoding for categorical features and min-max scaling for continuous features.
 
-    // Training data (XOR example)
-    let inputs = vec![Matrix::from(4, 2, vec![0.0, 0.0, 0.0, 1.0, 1.0, 0.0, 1.0, 1.0])];
-    let targets = vec![Matrix::from(4, 1, vec![0.0, 1.0, 1.0, 0.0])];
+Achieved Test Cost: 6.283496242342301
 
-    // Train for 1000 epochs
-    nn.train(inputs, targets, 1000, 0.1);
+![Abalone Cost](./playground/plotters-doc-data/abalone-cost.png)
 
-    // Predict
-    let prediction = nn.predict(Matrix::from(1, 2, vec![1.0, 0.0]));
-    println!("Prediction: {:?}", prediction.data);
-}
-```
+### Fuel Efficiency Prediction
+Predicts the fuel efficiency (MPG) of various car models based on attributes like cylinders, displacement, and weight.
+- **Architecture**: `[8, 64, 64, 1]` with `RELU` and `LINEAR` activations.
+- **Loss Function**: `MSE`.
+- **Preprocessing**: Mean normalization and min-max scaling.
+
+Achieved Test Cost: 0.3197017785268062
+
+![Fuel Efficiency Cost](./playground/plotters-doc-data/fuel-cost.png)
+
+### MNIST Digit Classification
+The classic MNIST dataset for classifying handwritten digits (0-9).
+- **Architecture**: `[784, 128, 10]` with `RELU` and `SOFTMAX` activations.
+- **Loss Function**: `SPARSE_CATEGORICAL_CROSSENTROPY`.
+- **Preprocessing**: Pixel value normalization (0-1).
+
+Achieved Test Accuracy: 0.8346 (Cost: 0.8359729594421659)
+
+![MNIST Cost](./playground/plotters-doc-data/mnist-cost.png)

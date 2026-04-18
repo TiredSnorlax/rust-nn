@@ -321,6 +321,10 @@ impl Matrix {
             }
         }
     }
+
+    pub fn row(&self, index: usize) -> Vec<f64> {
+        self.data[index * self.cols..(index + 1) * self.cols].to_vec()
+    }
 }
 
 #[cfg(test)]
