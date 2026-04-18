@@ -30,12 +30,12 @@ impl NeuralNetwork {
         for i in 1..layers.len() {
             let num_neurons = layers[i];
             let prev_num_neurons = layers[i - 1];
-            // He initialization: bounds = sqrt(2/fan_in) for ReLU
-            let bound = (2.0 / prev_num_neurons as f64).sqrt();
+            // The range here is to ensure that the weights are small enough to avoid exploding gradients
+            let range = 0.01;
             weights.push(Matrix::random_range(
                 num_neurons,
                 prev_num_neurons,
-                -bound..=bound,
+                -range..=range,
             ));
             // Bias initialized to 0, not random
             bias.push(Matrix::new(num_neurons, 1));
