@@ -42,8 +42,8 @@ pub fn run_abalone() {
     // Save for regularization later
     let (temp_x, _) = df.convert_to_matrix().unwrap();
     // Max and Min along the columns
-    let max = temp_x.max(Some(2));
-    let min = temp_x.min(Some(2));
+    let max = temp_x.max(Some(1));
+    let min = temp_x.min(Some(1));
 
     let (train, test) = df.split(0.8);
 
@@ -65,10 +65,15 @@ pub fn run_abalone() {
         train_y.push(y);
     }
 
-    let mut nn = NeuralNetwork::new(vec![10, 64, 64, 1], vec![RELU, RELU, LINEAR], MSE);
+    let mut nn = NeuralNetwork::new(
+        vec![10, 64, 64, 1],
+        vec![RELU, RELU, LINEAR],
+        MSE,
+        Box::new(neural_network::optimizers::SGD::new(0.001, 0.0)),
+    );
 
-    let history = nn.train(train_x, train_y, 100, 0.001, 0.2);
-    plot_cost(history, "abalone-cost.png").unwrap();
+    let history = nn.train(train_x, train_y, 100, 0.2);
+    plot_cost(&history, "abalone-cost.png").unwrap();
 
     // Evaluate
     let (test_x, test_y) = test.convert_to_matrix().unwrap();

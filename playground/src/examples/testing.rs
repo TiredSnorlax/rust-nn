@@ -4,11 +4,10 @@ use neural_network::{
     loss_functions::MSE,
     nn::NeuralNetwork,
 };
-use rand::RngExt;
 
-use crate::examples::helpers::plot_cost;
+use crate::examples::helpers::{compare_costs, plot_cost};
 
-pub fn run_fuel_efficiency() {
+pub fn run_testing() {
     let file_name = "./playground/data/auto-mpg/auto-mpg.data";
     let names = vec![
         "displacement",
@@ -59,7 +58,7 @@ pub fn run_fuel_efficiency() {
 
     let (train, test) = df.split(0.8);
 
-    let train = train.batch(100);
+    let train = train.batch(64);
 
     let mut train_x = Vec::new();
     let mut train_y = Vec::new();
@@ -76,16 +75,32 @@ pub fn run_fuel_efficiency() {
         train_y.push(y);
     }
 
-    // Define neural network structure
-    let mut nn = NeuralNetwork::new(
+    // Neural network using SGD without momentum
+    let mut nn_normal = NeuralNetwork::new(
         vec![train_x[0].cols, 64, 64, 1],
         vec![RELU, RELU, LINEAR],
         MSE,
-        Box::new(neural_network::optimizers::SGD::new(0.01, 0.)),
+        Box::new(neural_network::optimizers::SGD::new(0.01, 0.0)),
     );
 
-    let history = nn.train(train_x, train_y, 100, 0.2);
-    plot_cost(&history, "fuel-cost.png").unwrap();
+    let mut nn_momentum = NeuralNetwork::new(
+        vec![train_x[0].cols, 64, 64, 1],
+        vec![RELU, RELU, LINEAR],
+        MSE,
+        Box::new(neural_network::optimizers::SGD::new(0.01, 0.001).momentum(0.9)),
+    );
+
+    let history_normal = nn_normal.train(train_x.clone(), train_y.clone(), 300, 0.2);
+    plot_cost(&history_normal, "fuel-cost.png").unwrap();
+
+    let history_momentum = nn_momentum.train(train_x, train_y, 300, 0.2);
+    plot_cost(&history_momentum, "fuel-cost-momentum.png").unwrap();
+
+    compare_costs(
+        vec![&history_normal, &history_momentum],
+        "fuel-cost-comparison.png",
+    )
+    .unwrap();
 
     // Evaluate model
     // Regularize test data using mean from whole set
@@ -97,17 +112,7 @@ pub fn run_fuel_efficiency() {
                 .subtract(&min.broadcast_rows(test_x.rows)),
         );
 
-    let outputs = nn.evaluate(test_x, test_y.clone());
+    let _ = nn_normal.evaluate(test_x.clone(), test_y.clone());
 
-    // Visualize
-    let mut rng = rand::rng();
-    for _ in 0..10 {
-        // randomly sample
-        let i = rng.random_range(0..test_y.rows);
-        println!(
-            "Predicted: {:?}, Label: {}",
-            &outputs.data[i],
-            test_y.transpose().data[i]
-        )
-    }
+    let _ = nn_momentum.evaluate(test_x, test_y.clone());
 }

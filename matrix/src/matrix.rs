@@ -1,4 +1,5 @@
-use rand::RngExt;
+use rand::{RngExt, SeedableRng, rngs::StdRng};
+use rand_distr::{Distribution, Normal};
 
 #[derive(Clone, Debug)]
 pub struct Matrix {
@@ -25,7 +26,8 @@ impl Matrix {
     pub fn random(rows: usize, cols: usize) -> Self {
         assert!(rows > 0 && cols > 0, "rows and cols must be greater than 0");
 
-        let mut rng = rand::rng();
+        let mut rng = StdRng::seed_from_u64(1);
+        // let mut rng = rand::rng();
 
         let data: Vec<f64> = (0..rows * cols)
             .map(|_| rng.random_range(0.0..=1.))
@@ -37,11 +39,24 @@ impl Matrix {
     pub fn random_range(rows: usize, cols: usize, range: std::ops::RangeInclusive<f64>) -> Self {
         assert!(rows > 0 && cols > 0, "rows and cols must be greater than 0");
 
-        let mut rng = rand::rng();
+        let mut rng = StdRng::seed_from_u64(1);
+        // let mut rng = rand::rng();
 
         let data: Vec<f64> = (0..rows * cols)
             .map(|_| rng.random_range(range.clone()))
             .collect();
+
+        Self { rows, cols, data }
+    }
+
+    pub fn random_normal(rows: usize, cols: usize, mean: f64, std: f64) -> Self {
+        assert!(rows > 0 && cols > 0, "rows and cols must be greater than 0");
+
+        let mut rng = StdRng::seed_from_u64(1);
+        // let mut rng = rand::rng();
+        let normal = Normal::new(mean, std).unwrap();
+
+        let data: Vec<f64> = (0..rows * cols).map(|_| normal.sample(&mut rng)).collect();
 
         Self { rows, cols, data }
     }
@@ -54,12 +69,12 @@ impl Matrix {
     /// Broadcast matrix from shape (n, 1) to (n, x)
     pub fn broadcast_cols(&self, cols: usize) -> Self {
         assert!(cols > 0, "cols must be greater than 0");
-        let mut data = Vec::with_capacity(self.rows * cols);
-        for row in 0..self.rows {
-            for _ in 0..cols {
-                data.push(self.data[row]);
-            }
-        }
+        let data = self
+            .data
+            .iter()
+            .flat_map(|&val| std::iter::repeat(val).take(cols))
+            .collect();
+
         Matrix {
             rows: self.rows,
             cols,
@@ -70,12 +85,8 @@ impl Matrix {
     /// Broadcast matrix from shape (1, n) to (x, n)
     pub fn broadcast_rows(&self, rows: usize) -> Self {
         assert!(rows > 0, "rows must be greater than 0");
-        let mut data = Vec::with_capacity(self.cols * rows);
-        for _ in 0..rows {
-            for col in 0..self.cols {
-                data.push(self.data[col]);
-            }
-        }
+        let data = (0..rows).flat_map(|_| self.data.iter().copied()).collect();
+
         Matrix {
             rows,
             cols: self.cols,
@@ -96,11 +107,18 @@ impl Matrix {
             "Matrices must have the same shape"
         );
 
-        let mut result = Self::new(self.rows, self.cols);
-        for i in 0..(self.rows * self.cols) {
-            result.data[i] = self.data[i] + other.data[i];
+        let data = self
+            .data
+            .iter()
+            .zip(&other.data)
+            .map(|(a, b)| a + b)
+            .collect();
+
+        Self {
+            rows: self.rows,
+            cols: self.cols,
+            data,
         }
-        result
     }
 
     pub fn subtract(&self, other: &Self) -> Self {
@@ -110,11 +128,18 @@ impl Matrix {
             "Matrices must have the same shape"
         );
 
-        let mut result = Self::new(self.rows, self.cols);
-        for i in 0..(self.rows * self.cols) {
-            result.data[i] = self.data[i] - other.data[i];
+        let data = self
+            .data
+            .iter()
+            .zip(&other.data)
+            .map(|(a, b)| a - b)
+            .collect();
+
+        Self {
+            rows: self.rows,
+            cols: self.cols,
+            data,
         }
-        result
     }
 
     pub fn multiply_elementwise(&self, other: &Self) -> Self {
@@ -124,11 +149,18 @@ impl Matrix {
             "Matrices must have the same shape"
         );
 
-        let mut result = Self::new(self.rows, self.cols);
-        for i in 0..(self.rows * self.cols) {
-            result.data[i] = self.data[i] * other.data[i];
+        let data = self
+            .data
+            .iter()
+            .zip(&other.data)
+            .map(|(a, b)| a * b)
+            .collect();
+
+        Self {
+            rows: self.rows,
+            cols: self.cols,
+            data,
         }
-        result
     }
 
     pub fn divide_elementwise(&self, other: &Self) -> Self {
@@ -138,19 +170,28 @@ impl Matrix {
             "Matrices must have the same shape"
         );
 
-        let mut result = Self::new(self.rows, self.cols);
-        for i in 0..(self.rows * self.cols) {
-            result.data[i] = self.data[i] / other.data[i];
+        let data = self
+            .data
+            .iter()
+            .zip(&other.data)
+            .map(|(a, b)| a / b)
+            .collect();
+
+        Self {
+            rows: self.rows,
+            cols: self.cols,
+            data,
         }
-        result
     }
 
     pub fn map(&self, func: impl Fn(f64) -> f64) -> Self {
-        let mut result = Self::new(self.rows, self.cols);
-        for i in 0..(self.rows * self.cols) {
-            result.data[i] = func(self.data[i]);
+        let data = self.data.iter().map(|&x| func(x)).collect();
+
+        Self {
+            rows: self.rows,
+            cols: self.cols,
+            data,
         }
-        result
     }
 
     pub fn matmul(&self, other: &Self) -> Self {
@@ -162,10 +203,9 @@ impl Matrix {
         let mut result = Self::new(self.rows, other.cols);
         for i in 0..self.rows {
             for j in 0..other.cols {
-                let mut sum = 0.;
-                for k in 0..self.cols {
-                    sum += self.data[i * self.cols + k] * other.data[k * other.cols + j];
-                }
+                let sum = (0..self.cols)
+                    .map(|k| self.data[i * self.cols + k] * other.data[k * other.cols + j])
+                    .sum();
                 result.data[i * other.cols + j] = sum;
             }
         }
@@ -176,19 +216,20 @@ impl Matrix {
     pub fn transpose(&self) -> Self {
         let mut result = Self::new(self.cols, self.rows);
 
-        for i in 0..self.rows {
-            for j in 0..self.cols {
+        (0..self.rows)
+            .flat_map(|i| (0..self.cols).map(move |j| (i, j)))
+            .for_each(|(i, j)| {
                 result.data[j * self.rows + i] = self.data[i * self.cols + j];
-            }
-        }
+            });
 
         result
     }
 
+    /// Axis follows the shape convention: 0 = rows, 1 = cols
     pub fn sum(&self, axis: Option<usize>) -> Matrix {
         if let Some(dim) = axis {
             match dim {
-                1 => {
+                0 => {
                     // Sum row-wise
                     let mut result = Matrix::new(self.rows, 1);
                     for i in 0..self.rows {
@@ -199,7 +240,7 @@ impl Matrix {
                     result
                 }
 
-                2 => {
+                1 => {
                     // Sum col-wise
                     let mut result = Matrix::new(1, self.cols);
                     let transposed = self.transpose();
@@ -230,9 +271,10 @@ impl Matrix {
         }
     }
 
+    /// Axis follows the shape convention: 0 = rows, 1 = cols
     pub fn max(&self, axis: Option<usize>) -> Matrix {
         if let Some(dim) = axis {
-            if dim == 1 {
+            if dim == 0 {
                 let mut result = Vec::with_capacity(self.cols);
                 for i in 0..self.rows {
                     let max_val = self.data[i * self.cols..(i + 1) * self.cols]
@@ -245,7 +287,7 @@ impl Matrix {
                     cols: 1,
                     data: result,
                 }
-            } else if dim == 2 {
+            } else if dim == 1 {
                 let transposed = self.transpose();
                 let mut result = Vec::with_capacity(self.rows);
                 for i in 0..self.cols {
@@ -276,9 +318,10 @@ impl Matrix {
         }
     }
 
+    /// Axis follows the shape convention: 0 = rows, 1 = cols
     pub fn min(&self, axis: Option<usize>) -> Matrix {
         if let Some(dim) = axis {
-            if dim == 1 {
+            if dim == 0 {
                 let mut result = Vec::with_capacity(self.cols);
                 for i in 0..self.rows {
                     let min_val = self.data[i * self.cols..(i + 1) * self.cols]
@@ -291,7 +334,7 @@ impl Matrix {
                     cols: 1,
                     data: result,
                 }
-            } else if dim == 2 {
+            } else if dim == 1 {
                 let transposed = self.transpose();
                 let mut result = Vec::with_capacity(self.rows);
                 for i in 0..self.cols {
@@ -578,7 +621,7 @@ mod tests {
         // [1., 2., 3.] => [6.]
         // [4., 5., 6.] => [15.]
         let matrix = matrix_from_vec(2, 3, vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
-        let result = matrix.sum(Some(1));
+        let result = matrix.sum(Some(0));
         assert_eq!(result.data, vec![6., 15.]);
         assert_eq!(result.shape(), (2, 1));
     }
@@ -588,7 +631,7 @@ mod tests {
         // [1., 2., 3.] => [5., 7., 9.]
         // [4., 5., 6.]
         let matrix = matrix_from_vec(2, 3, vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
-        let result = matrix.sum(Some(2));
+        let result = matrix.sum(Some(1));
         assert_eq!(result.data, vec![5., 7., 9.]);
         assert_eq!(result.shape(), (1, 3));
     }
@@ -604,7 +647,7 @@ mod tests {
     #[test]
     fn test_max_row() {
         let matrix = matrix_from_vec(2, 3, vec![1.0, 5.0, 3.0, 4.0, 2.0, 6.0]);
-        let result = matrix.max(Some(1));
+        let result = matrix.max(Some(0));
         assert_eq!(result.data, vec![5., 6.]);
         assert_eq!(result.shape(), (2, 1));
     }
@@ -612,7 +655,7 @@ mod tests {
     #[test]
     fn test_max_col() {
         let matrix = matrix_from_vec(2, 3, vec![1.0, 5.0, 3.0, 4.0, 2.0, 6.0]);
-        let result = matrix.max(Some(2));
+        let result = matrix.max(Some(1));
         assert_eq!(result.data, vec![4., 5., 6.]);
         assert_eq!(result.shape(), (1, 3));
     }
@@ -628,7 +671,7 @@ mod tests {
     #[test]
     fn test_min_row() {
         let matrix = matrix_from_vec(2, 3, vec![1.0, 5.0, 3.0, 4.0, 2.0, 6.0]);
-        let result = matrix.min(Some(1));
+        let result = matrix.min(Some(0));
         assert_eq!(result.data, vec![1., 2.]);
         assert_eq!(result.shape(), (2, 1));
     }
@@ -636,7 +679,7 @@ mod tests {
     #[test]
     fn test_min_col() {
         let matrix = matrix_from_vec(2, 3, vec![1.0, 5.0, 3.0, 4.0, 2.0, 6.0]);
-        let result = matrix.min(Some(2));
+        let result = matrix.min(Some(1));
         assert_eq!(result.data, vec![1., 2., 3.]);
         assert_eq!(result.shape(), (1, 3));
     }

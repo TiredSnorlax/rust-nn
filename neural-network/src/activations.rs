@@ -26,7 +26,7 @@ pub const SOFTMAX: Activation = Activation {
     function: |x: &Matrix| {
         let exp = x.map(|x| E.powf(x));
         // Sum column-wise
-        let e_sum = exp.sum(Some(2)).broadcast_rows(x.rows);
+        let e_sum = exp.sum(Some(1)).broadcast_rows(x.rows);
         exp.divide_elementwise(&e_sum)
     },
     // Softmax derivative is a Jacobian matrix, which doesn't fit the element-wise

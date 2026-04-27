@@ -2,7 +2,7 @@ use std::{error::Error, path::PathBuf};
 
 use plotters::prelude::*;
 
-pub fn plot_cost(history: (Vec<f64>, Vec<f64>), name: &str) -> Result<(), Box<dyn Error>> {
+pub fn plot_cost(history: &(Vec<f64>, Vec<f64>), name: &str) -> Result<(), Box<dyn Error>> {
     let path = PathBuf::from("./playground/plotters-doc-data").join(name);
     let root = BitMapBackend::new(path.as_path(), (640, 480)).into_drawing_area();
     root.fill(&WHITE)?;
@@ -44,6 +44,63 @@ pub fn plot_cost(history: (Vec<f64>, Vec<f64>), name: &str) -> Result<(), Box<dy
         .border_style(&BLACK)
         .draw()?;
 
+    root.present()?;
+    println!("Result has been saved to plotters-doc-data/0.png");
+
+    Ok(())
+}
+
+pub fn compare_costs(
+    histories: Vec<&(Vec<f64>, Vec<f64>)>,
+    name: &str,
+) -> Result<(), Box<dyn Error>> {
+    let path = PathBuf::from("./playground/plotters-doc-data").join(name);
+    let root = BitMapBackend::new(path.as_path(), (640, 480)).into_drawing_area();
+    root.fill(&WHITE)?;
+    let mut chart = ChartBuilder::on(&root)
+        .caption("Cost", ("sans-serif", 50).into_font())
+        .margin(5)
+        .x_label_area_size(30)
+        .y_label_area_size(30)
+        .build_cartesian_2d(
+            0.0..histories[0].0.len() as f64,
+            0.0..histories[0]
+                .0
+                .iter()
+                .fold(f64::NEG_INFINITY, |a, b| a.max(*b)),
+        )?;
+
+    chart
+        .configure_mesh()
+        .x_desc("Epochs")
+        .y_desc("Cost")
+        .draw()?;
+
+    let colors = [RED, BLUE, GREEN];
+    for (i, history) in histories.iter().enumerate() {
+        let color = colors[i % 3].clone();
+        chart
+            .draw_series(LineSeries::new(
+                history.1.iter().enumerate().map(|(x, y)| (x as f64, *y)),
+                &color,
+            ))?
+            .label(&format!("Validation {}", i))
+            .legend(move |(x, y)| PathElement::new(vec![(x, y), (x + 20, y)], color));
+
+        // chart
+        //     .draw_series(LineSeries::new(
+        //         history.1.iter().enumerate().map(|(x, y)| (x as f64, *y)),
+        //         &colors[i],
+        //     ))?
+        //     .label(&format!("Validation {}", i))
+        //     .legend(|(x, y)| PathElement::new(vec![(x, y), (x + 20, y)], BLUE));
+    }
+
+    chart
+        .configure_series_labels()
+        .background_style(&WHITE.mix(0.8))
+        .border_style(&BLACK)
+        .draw()?;
     root.present()?;
     println!("Result has been saved to plotters-doc-data/0.png");
 

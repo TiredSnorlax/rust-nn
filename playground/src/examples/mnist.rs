@@ -53,10 +53,11 @@ pub fn run_mnist() {
         vec![train_x[0].cols, 128, 10],
         vec![RELU, SOFTMAX],
         SPARSE_CATEGORICAL_CROSSENTROPY,
+        Box::new(neural_network::optimizers::SGD::new(0.001, 0.0)),
     );
 
-    let history = nn.train(train_x, train_y, 10, 0.001, 0.2);
-    plot_cost(history, "mnist-cost.png").unwrap();
+    let history = nn.train(train_x, train_y, 10, 0.2);
+    plot_cost(&history, "mnist-cost.png").unwrap();
 
     // Evaluate model
     // Regularize test data using mean from whole set

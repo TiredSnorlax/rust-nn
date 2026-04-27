@@ -1,20 +1,21 @@
-use crate::{activations::Activation, loss_functions::LossFunction};
+use crate::{activations::Activation, loss_functions::LossFunction, optimizers::Optimizer};
 use matrix::matrix::Matrix;
-use rand::RngExt;
 
 pub struct NeuralNetwork {
     layers: Vec<usize>,
     weights: Vec<Matrix>,
     bias: Vec<Matrix>,
     activations: Vec<Activation>,
-    cost_function: LossFunction,
+    loss_function: LossFunction,
+    optimizer: Box<dyn Optimizer>,
 }
 
 impl NeuralNetwork {
     pub fn new(
         layers: Vec<usize>,
         activations: Vec<Activation>,
-        cost_function: LossFunction,
+        loss_function: LossFunction,
+        mut optimizer: Box<dyn Optimizer>,
     ) -> Self {
         assert!(layers.len() > 0, "Do not create empty neural network");
 
@@ -30,23 +31,24 @@ impl NeuralNetwork {
         for i in 1..layers.len() {
             let num_neurons = layers[i];
             let prev_num_neurons = layers[i - 1];
-            // The range here is to ensure that the weights are small enough to avoid exploding gradients
-            let range = 0.01;
-            weights.push(Matrix::random_range(
-                num_neurons,
-                prev_num_neurons,
-                -range..=range,
-            ));
+            // He initialization
+            let range = 1. / (prev_num_neurons as f64).sqrt();
+            weights.push(
+                Matrix::random_normal(num_neurons, prev_num_neurons, 0., 1.).map(|x| x * range),
+            );
             // Bias initialized to 0, not random
             bias.push(Matrix::new(num_neurons, 1));
         }
+
+        optimizer.initialize(&weights, &bias);
 
         Self {
             layers,
             weights,
             bias,
             activations,
-            cost_function,
+            loss_function,
+            optimizer,
         }
     }
 
@@ -95,10 +97,10 @@ impl NeuralNetwork {
     pub fn cost(&self, outputs: &Matrix, targets: &Matrix, batch_size: usize) -> f64 {
         // let diff = outputs.subtract(&targets);
         // let squared = diff.map(|x| x * x);
-        let cost = (self.cost_function.function)(outputs, targets);
-        let sum = cost.sum(None).data[0];
+        let loss = (self.loss_function.function)(outputs, targets);
+        let cost = loss.sum(None).data[0];
 
-        sum / batch_size as f64
+        cost / batch_size as f64
     }
 
     // For now we will run backprop immediately after feed_forward.
@@ -122,7 +124,7 @@ impl NeuralNetwork {
         let m = outputs.shape().1 as f64;
 
         // dC_da
-        let mut dC_da = (self.cost_function.derivative)(&outputs, targets); // (n_output, m)
+        let mut dC_da = (self.loss_function.derivative)(&outputs, targets); // (n_output, m)
 
         // Weights: 1, 0
         // Activations: 2, 1, 0
@@ -152,7 +154,7 @@ impl NeuralNetwork {
             // Weight gradients: (n_i, n_{i-1}) - sum already done via matmul across batch
             dc_dw.push(dC_dw_i.map(|x| x / m)); // shape: (n_i, n_{i-1})
             // Bias gradients: sum across batch examples, then average
-            dc_db.push(dC_db_i.sum(Some(1)).map(|x| x / m)); // shape: (n_i, 1)
+            dc_db.push(dC_db_i.sum(Some(0)).map(|x| x / m)); // shape: (n_i, 1)
 
             // For the next iteration
             // dC_da_L-1 = dC_dz * dz_da
@@ -189,7 +191,6 @@ impl NeuralNetwork {
         mut inputs: Vec<Matrix>,
         mut targets: Vec<Matrix>,
         num_epochs: usize,
-        learning_rate: f64,
         validation_split: f64,
     ) -> (Vec<f64>, Vec<f64>) {
         let validation_split_index = (inputs.len() as f64 * (1. - validation_split)) as usize;
@@ -230,7 +231,10 @@ impl NeuralNetwork {
                 let (dc_dw, dc_db) =
                     self.backpropagate(outputs, &targets[batch].transpose(), a_values, z_values);
 
-                self.gradient_descent(dc_dw, dc_db, learning_rate);
+                self.optimizer
+                    .step(&dc_dw, &dc_db, &mut self.weights, &mut self.bias);
+
+                // self.gradient_descent(dc_dw, dc_db, learning_rate);
             }
             let total_cost = total_cost / num_batches as f64;
             train_history.push(total_cost);
@@ -265,14 +269,16 @@ impl NeuralNetwork {
         weights: Vec<Matrix>,
         biases: Vec<Matrix>,
         activations: Vec<Activation>,
-        cost_function: LossFunction,
+        loss_function: LossFunction,
+        optimizer: Box<dyn Optimizer>,
     ) -> Self {
         Self {
             layers,
             weights,
             bias: biases,
             activations,
-            cost_function,
+            loss_function,
+            optimizer,
         }
     }
 }
@@ -283,6 +289,7 @@ mod tests {
     use crate::{
         activations::{RELU, SIGMOID},
         loss_functions::MSE,
+        optimizers,
     };
 
     #[test]
@@ -332,6 +339,7 @@ mod tests {
             biases,
             vec![RELU, RELU],
             MSE,
+            Box::new(optimizers::SGD::new(0.5, 0.0)),
         );
 
         let input = Matrix {
@@ -408,6 +416,7 @@ mod tests {
             biases,
             vec![RELU, SIGMOID],
             MSE,
+            Box::new(optimizers::SGD::new(0.1, 0.0)),
         );
 
         let input = Matrix {
@@ -468,10 +477,15 @@ mod tests {
             ],
         )];
 
-        let mut nn = NeuralNetwork::new(vec![2, 3, 1], vec![RELU, SIGMOID], MSE);
+        let mut nn = NeuralNetwork::new(
+            vec![2, 3, 1],
+            vec![RELU, SIGMOID],
+            MSE,
+            Box::new(optimizers::SGD::new(0.1, 0.0)),
+        );
 
         println!("\n=== AND Gate Test (batch_size=4) ===");
-        nn.train(batch_inputs.clone(), batch_targets.clone(), 800, 0.5, 0.0);
+        nn.train(batch_inputs.clone(), batch_targets.clone(), 800, 0.0);
 
         // Test all 4 combinations individually
         let test_cases = vec![
@@ -539,10 +553,15 @@ mod tests {
             ],
         )];
 
-        let mut nn = NeuralNetwork::new(vec![2, 3, 1], vec![RELU, SIGMOID], MSE);
+        let mut nn = NeuralNetwork::new(
+            vec![2, 3, 1],
+            vec![RELU, SIGMOID],
+            MSE,
+            Box::new(optimizers::SGD::new(0.5, 0.0)),
+        );
 
         println!("\n=== OR Gate Test (batch_size=4) ===");
-        nn.train(batch_inputs.clone(), batch_targets.clone(), 500, 0.5, 0.0);
+        nn.train(batch_inputs.clone(), batch_targets.clone(), 500, 0.0);
 
         // Test all 4 combinations individually
         let test_cases = vec![
@@ -600,7 +619,12 @@ mod tests {
             create_matrix(2, 1, vec![0.4, 0.8]),
         ];
 
-        let mut nn = NeuralNetwork::new(vec![1, 2, 1], vec![RELU, SIGMOID], MSE);
+        let mut nn = NeuralNetwork::new(
+            vec![1, 2, 1],
+            vec![RELU, SIGMOID],
+            MSE,
+            Box::new(optimizers::SGD::new(0.1, 0.0)),
+        );
 
         // Calculate initial cost
         let (initial_out_0, _, _) = nn.feed_forward(&inputs[0]);
@@ -612,7 +636,7 @@ mod tests {
         println!("Initial cost: {:.6}", initial_total_cost);
 
         // Train with mixed batch sizes (1 and 2)
-        nn.train(inputs.clone(), targets.clone(), 300, 0.1, 0.0);
+        nn.train(inputs.clone(), targets.clone(), 300, 0.0);
 
         // Calculate final cost
         let (final_out_0, _, _) = nn.feed_forward(&inputs[0]);
@@ -655,10 +679,15 @@ mod tests {
             ],
         )];
 
-        let mut nn = NeuralNetwork::new(vec![2, 3, 1], vec![RELU, SIGMOID], BINARY_CROSSENTROPY);
+        let mut nn = NeuralNetwork::new(
+            vec![2, 3, 1],
+            vec![RELU, SIGMOID],
+            BINARY_CROSSENTROPY,
+            Box::new(optimizers::SGD::new(0.1, 0.0)),
+        );
 
         println!("\n=== OR Gate Test Logistic (batch_size=4) ===");
-        nn.train(batch_inputs.clone(), batch_targets.clone(), 500, 0.5, 0.0);
+        nn.train(batch_inputs.clone(), batch_targets.clone(), 500, 0.0);
 
         let test_cases = vec![
             (create_matrix(1, 2, vec![0.0, 0.0]), 0.0, "(0,0)"),

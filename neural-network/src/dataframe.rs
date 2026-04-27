@@ -1,3 +1,4 @@
+use rand::{SeedableRng, rngs::StdRng, seq::SliceRandom};
 use std::{
     error::Error,
     fmt::Display,
@@ -180,9 +181,9 @@ impl Dataframe {
 
     /// Split dataframe into 2 dataframes by ratio using random sampling.
     pub fn split(&self, ratio: f64) -> (Self, Self) {
-        use rand::seq::SliceRandom;
         let mut indices: Vec<usize> = (0..self.features.len()).collect();
-        let mut rng = rand::rng();
+        let mut rng = StdRng::seed_from_u64(1);
+        // let mut rng = rand::rng();
         indices.shuffle(&mut rng);
 
         let split_index = (self.features.len() as f64 * ratio) as usize;
