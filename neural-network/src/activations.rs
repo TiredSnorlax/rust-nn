@@ -22,6 +22,12 @@ pub const LINEAR: Activation = Activation {
     derivative: |x: &Matrix| x.map(|_| 1.),
 };
 
+// This is here because I don't want to deal with options in Layers just becaues of input layers.
+pub const NONE: Activation = Activation {
+    function: |x: &Matrix| x.map(|_| 0.),
+    derivative: |x: &Matrix| x.map(|_| 0.),
+};
+
 pub const SOFTMAX: Activation = Activation {
     function: |x: &Matrix| {
         let exp = x.map(|x| E.powf(x));

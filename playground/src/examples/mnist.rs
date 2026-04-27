@@ -1,8 +1,8 @@
 use neural_network::{
-    activations::{RELU, SOFTMAX},
+    activations::{NONE, RELU, SOFTMAX},
     dataframe::{Dataframe, FeatureTypes},
     loss_functions::SPARSE_CATEGORICAL_CROSSENTROPY,
-    nn::NeuralNetwork,
+    nn::{Layer, NeuralNetwork},
 };
 use rand::RngExt;
 
@@ -50,10 +50,22 @@ pub fn run_mnist() {
 
     // Construct neural network
     let mut nn = NeuralNetwork::new(
-        vec![train_x[0].cols, 128, 10],
-        vec![RELU, SOFTMAX],
+        vec![
+            Layer {
+                units: train_x[0].cols,
+                activation: NONE,
+            },
+            Layer {
+                units: 128,
+                activation: RELU,
+            },
+            Layer {
+                units: 10,
+                activation: SOFTMAX,
+            },
+        ],
         SPARSE_CATEGORICAL_CROSSENTROPY,
-        Box::new(neural_network::optimizers::SGD::new(0.001, 0.0)),
+        Box::new(neural_network::optimizers::SGD::new(0.001, None, 0.0)),
     );
 
     let history = nn.train(train_x, train_y, 10, 0.2);

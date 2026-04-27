@@ -1,9 +1,9 @@
 use matrix::matrix::Matrix;
 use neural_network::{
-    activations::{LINEAR, RELU},
+    activations::{LINEAR, NONE, RELU},
     dataframe::{Dataframe, FeatureTypes},
     loss_functions::MSE,
-    nn::NeuralNetwork,
+    nn::{Layer, NeuralNetwork},
 };
 use rand::RngExt;
 
@@ -66,10 +66,26 @@ pub fn run_abalone() {
     }
 
     let mut nn = NeuralNetwork::new(
-        vec![10, 64, 64, 1],
-        vec![RELU, RELU, LINEAR],
+        vec![
+            Layer {
+                units: 10,
+                activation: NONE,
+            },
+            Layer {
+                units: 64,
+                activation: RELU,
+            },
+            Layer {
+                units: 64,
+                activation: RELU,
+            },
+            Layer {
+                units: 1,
+                activation: LINEAR,
+            },
+        ],
         MSE,
-        Box::new(neural_network::optimizers::SGD::new(0.001, 0.0)),
+        Box::new(neural_network::optimizers::SGD::new(0.001, None, 0.0)),
     );
 
     let history = nn.train(train_x, train_y, 100, 0.2);

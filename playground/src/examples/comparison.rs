@@ -1,13 +1,14 @@
 use neural_network::{
-    activations::{LINEAR, RELU},
+    activations::{LINEAR, NONE, RELU},
     dataframe::{Dataframe, FeatureTypes},
     loss_functions::MSE,
-    nn::NeuralNetwork,
+    nn::{Layer, NeuralNetwork},
+    optimizers::default_learning_rate_decay,
 };
 
 use crate::examples::helpers::{compare_costs, plot_cost};
 
-pub fn run_testing() {
+pub fn run_comparison() {
     let file_name = "./playground/data/auto-mpg/auto-mpg.data";
     let names = vec![
         "displacement",
@@ -77,17 +78,54 @@ pub fn run_testing() {
 
     // Neural network using SGD without momentum
     let mut nn_normal = NeuralNetwork::new(
-        vec![train_x[0].cols, 64, 64, 1],
-        vec![RELU, RELU, LINEAR],
+        vec![
+            Layer {
+                units: train_x[0].cols,
+                activation: NONE,
+            },
+            Layer {
+                units: 64,
+                activation: RELU,
+            },
+            Layer {
+                units: 64,
+                activation: RELU,
+            },
+            Layer {
+                units: 1,
+                activation: LINEAR,
+            },
+        ],
         MSE,
-        Box::new(neural_network::optimizers::SGD::new(0.01, 0.0)),
+        Box::new(neural_network::optimizers::SGD::new(0.01, None, 0.0)),
     );
 
     let mut nn_momentum = NeuralNetwork::new(
-        vec![train_x[0].cols, 64, 64, 1],
-        vec![RELU, RELU, LINEAR],
+        vec![
+            Layer {
+                units: train_x[0].cols,
+                activation: NONE,
+            },
+            Layer {
+                units: 64,
+                activation: RELU,
+            },
+            Layer {
+                units: 64,
+                activation: RELU,
+            },
+            Layer {
+                units: 1,
+                activation: LINEAR,
+            },
+        ],
         MSE,
-        Box::new(neural_network::optimizers::SGD::new(0.01, 0.001).momentum(0.9)),
+        Box::new(neural_network::optimizers::RMSprop::new(
+            0.001,
+            Some(default_learning_rate_decay(30, 0.999)),
+            0.999,
+            0.001,
+        )),
     );
 
     let history_normal = nn_normal.train(train_x.clone(), train_y.clone(), 300, 0.2);

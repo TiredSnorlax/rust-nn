@@ -10,7 +10,6 @@ pub struct Matrix {
 
 impl Matrix {
     pub fn new(rows: usize, cols: usize) -> Self {
-        assert!(rows > 0 && cols > 0, "rows and cols must be greater than 0");
         Self {
             rows,
             cols,
@@ -19,13 +18,10 @@ impl Matrix {
     }
 
     pub fn from(rows: usize, cols: usize, data: Vec<f64>) -> Self {
-        assert!(rows > 0 && cols > 0, "rows and cols must be greater than 0");
         Self { rows, cols, data }
     }
 
     pub fn random(rows: usize, cols: usize) -> Self {
-        assert!(rows > 0 && cols > 0, "rows and cols must be greater than 0");
-
         let mut rng = StdRng::seed_from_u64(1);
         // let mut rng = rand::rng();
 
@@ -37,8 +33,6 @@ impl Matrix {
     }
 
     pub fn random_range(rows: usize, cols: usize, range: std::ops::RangeInclusive<f64>) -> Self {
-        assert!(rows > 0 && cols > 0, "rows and cols must be greater than 0");
-
         let mut rng = StdRng::seed_from_u64(1);
         // let mut rng = rand::rng();
 
@@ -50,8 +44,6 @@ impl Matrix {
     }
 
     pub fn random_normal(rows: usize, cols: usize, mean: f64, std: f64) -> Self {
-        assert!(rows > 0 && cols > 0, "rows and cols must be greater than 0");
-
         let mut rng = StdRng::seed_from_u64(1);
         // let mut rng = rand::rng();
         let normal = Normal::new(mean, std).unwrap();
@@ -104,7 +96,7 @@ impl Matrix {
         assert_eq!(
             self.shape(),
             other.shape(),
-            "Matrices must have the same shape"
+            "Matrices must have the same shape when adding"
         );
 
         let data = self
@@ -125,7 +117,7 @@ impl Matrix {
         assert_eq!(
             self.shape(),
             other.shape(),
-            "Matrices must have the same shape"
+            "Matrices must have the same shape when subtracting"
         );
 
         let data = self

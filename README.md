@@ -21,6 +21,7 @@ The only dependency for **matrix** and **neural-network** is the **rand** crate.
 - Reductions: `sum`, `max`, `min` (supports global and axis-wise operations).
 - Broadcasting: `broadcast_cols` and `broadcast_rows` for flexible arithmetic.
 - Randomized initialization with range support.
+  - Normal distribution as well
 
 ### Neural Network Library (`neural-network`)
 - **Flexible Architecture**: Create networks with any number of layers and neurons.
@@ -30,11 +31,17 @@ The only dependency for **matrix** and **neural-network** is the **rand** crate.
   - `LINEAR`
 - **Loss Functions**:
   - `MSE` (Mean Squared Error)
-  - `LOGISTIC` (Binary Cross-Entropy) with numerical stability clipping.
+  - `Binary Cross-Entropy` 
+  - `Sparse Categorical Cross-Entropy` 
 - **Training**:
   - Backpropagation with automated gradient calculation.
-  - Gradient Descent optimizer.
-  - Batch training support.
+  - Different optimizers.
+    1. Gradient descent with momentum
+    2. RMSprop
+    3. Adam
+  - Regularization
+  - Weight Decay
+  - Custom Learning Rate decay
 - **Data Utilities**:
   - CSV parsing and processing.
   - One-hot encoding for categorical features.
@@ -43,35 +50,3 @@ The only dependency for **matrix** and **neural-network** is the **rand** crate.
 ## Examples
 
 The `playground` crate contains several examples demonstrating the library's capabilities on real-world datasets.
-
-### Abalone Age Prediction
-Predicts the age of abalone (number of rings) from physical measurements like length, diameter, and weight.
-- **Architecture**: `[10, 64, 64, 1]` with `RELU` and `LINEAR` activations.
-- **Loss Function**: `MSE` (Mean Squared Error).
-- **Preprocessing**: One-hot encoding for categorical features and min-max scaling for continuous features.
-
-Achieved Test Cost: 6.283496242342301
-
-![Abalone Cost](./playground/plotters-doc-data/abalone-cost.png)
-
-### Fuel Efficiency Prediction
-Predicts the fuel efficiency (MPG) of various car models based on attributes like cylinders, displacement, and weight.
-- **Architecture**: `[8, 64, 64, 1]` with `RELU` and `LINEAR` activations.
-- **Loss Function**: `MSE`.
-- **Preprocessing**: Mean normalization and min-max scaling.
-
-Achieved Test Cost: 0.3197017785268062
-
-![Fuel Efficiency Cost](./playground/plotters-doc-data/fuel-cost.png)
-
-### MNIST Digit Classification
-The classic MNIST dataset for classifying handwritten digits (0-9).
-- **Architecture**: `[784, 128, 10]` with `RELU` and `SOFTMAX` activations.
-- **Loss Function**: `SPARSE_CATEGORICAL_CROSSENTROPY`.
-- **Preprocessing**: Pixel value normalization (0-1).
-
-Achieved Test Accuracy: 0.8346 (Cost: 0.8359729594421659)
-
-Note: The dataset is not included as the file is too big.
-
-![MNIST Cost](./playground/plotters-doc-data/mnist-cost.png)

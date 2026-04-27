@@ -1,36 +1,40 @@
 use crate::{activations::Activation, loss_functions::LossFunction, optimizers::Optimizer};
 use matrix::matrix::Matrix;
 
+pub struct Layer {
+    pub units: usize,
+    pub activation: Activation,
+}
+
 pub struct NeuralNetwork {
-    layers: Vec<usize>,
+    layers: Vec<Layer>,
     weights: Vec<Matrix>,
     bias: Vec<Matrix>,
-    activations: Vec<Activation>,
     loss_function: LossFunction,
     optimizer: Box<dyn Optimizer>,
 }
 
 impl NeuralNetwork {
     pub fn new(
-        layers: Vec<usize>,
-        activations: Vec<Activation>,
+        layers: Vec<Layer>,
         loss_function: LossFunction,
         mut optimizer: Box<dyn Optimizer>,
     ) -> Self {
         assert!(layers.len() > 0, "Do not create empty neural network");
 
-        assert!(
-            activations.len() == layers.len() - 1,
-            "Wrong number of activations. Input layer does not have an activation."
-        );
-
+        // This will have the same length as layers, however the 0th index layer (input layer) will have an empty W and B
+        // This will help keep indexing consistent with the layers vector during feed forward and backwards
         let mut weights: Vec<Matrix> = Vec::with_capacity(layers.len());
         let mut bias: Vec<Matrix> = Vec::with_capacity(layers.len());
 
+        // Placeholder weights and biases; Should never be used.
+        weights.push(Matrix::new(0, 0));
+        bias.push(Matrix::new(0, 0));
+
+        let mut prev_num_neurons = layers[0].units;
         // Here we skip the input layer
-        for i in 1..layers.len() {
-            let num_neurons = layers[i];
-            let prev_num_neurons = layers[i - 1];
+        for layer in &layers[1..] {
+            let num_neurons = layer.units;
             // He initialization
             let range = 1. / (prev_num_neurons as f64).sqrt();
             weights.push(
@@ -38,6 +42,7 @@ impl NeuralNetwork {
             );
             // Bias initialized to 0, not random
             bias.push(Matrix::new(num_neurons, 1));
+            prev_num_neurons = num_neurons;
         }
 
         optimizer.initialize(&weights, &bias);
@@ -46,7 +51,6 @@ impl NeuralNetwork {
             layers,
             weights,
             bias,
-            activations,
             loss_function,
             optimizer,
         }
@@ -58,18 +62,21 @@ impl NeuralNetwork {
     pub fn feed_forward(&self, inputs: &Matrix) -> (Matrix, Vec<Matrix>, Vec<Matrix>) {
         assert_eq!(
             inputs.shape().1,
-            self.layers[0],
+            self.layers[0].units,
             "Input shape does not match the network's input layer"
         );
 
         let mut values = inputs.transpose(); // shape: (n_features, m)
-        // Activation values
         let mut a_values = Vec::with_capacity(self.layers.len());
+        let mut z_values = Vec::with_capacity(self.layers.len());
+        // Activation values for the first input layer (just input values)
         a_values.push(values.clone());
-        // Values before going through activation function
-        let mut z_values = Vec::with_capacity(self.weights.len());
+        z_values.push(values.clone());
 
-        for i in 0..self.weights.len() {
+        // Skip the first input layer
+        for i in 1..self.layers.len() {
+            let layer = &self.layers[i];
+
             let w = &self.weights[i]; // shape: (n_i, n_{i-1})
             let b = &self.bias[i]; // shape: (n_i, 1)
 
@@ -82,7 +89,8 @@ impl NeuralNetwork {
 
             let z = z_weighted.add(&b_broadcast); // shape: (n_i, m)
             z_values.push(z.clone());
-            let activation = &self.activations[i]; // shape: (n_i, m)
+            // The reason for i - 1 index is that activations have one less element than layers
+            let activation = &layer.activation; // shape: (n_i, m)
             let a = (activation.function)(&z);
             a_values.push(a.clone());
 
@@ -124,24 +132,34 @@ impl NeuralNetwork {
         let m = outputs.shape().1 as f64;
 
         // dC_da
-        let mut dC_da = (self.loss_function.derivative)(&outputs, targets); // (n_output, m)
+        // let mut dC_da = (self.loss_function.derivative)(&outputs, targets); // (n_output, m)
 
-        // Weights: 1, 0
+        // Here we compute the last layer manually, since the computation for dC_dz is different
+        // dC_dz = A - Y;
+        let dC_dz = outputs.subtract(targets);
+
+        let dz_dw = a_values[a_values.len() - 2].clone(); // shape: (n_{i-1}, m)
+        let dz_da = &self.weights[self.weights.len() - 1]; // shape: (n_i, n_{i-1})
+
+        let dC_dw_i = dC_dz.matmul(&dz_dw.transpose()); // shape: (n_i, n_{i-1})
+        let dC_db_i = dC_dz.clone();
+        dc_dw.push(dC_dw_i.map(|x| x / m)); // shape: (n_i, n_{i-1})
+        dc_db.push(dC_db_i.sum(Some(0)).map(|x| x / m)); // shape: (n_i, 1)
+
+        let mut dC_da = dz_da.transpose().matmul(&dC_dz);
+
+        // Weights: 2, 1, 0 (0th index should not be used as it is just a placeholder)
         // Activations: 2, 1, 0
-        for i in (1..self.layers.len()).rev() {
-            // w_i is used to index weights and biases as there is one less weight/bias than layers
-            // activations and weights have the same number as layers so they use i
-            let w_i = i - 1;
-
+        for i in (1..self.layers.len() - 1).rev() {
             // da_dz = g'(z)
             // dC_dz = dC_da * da_dz
             let dC_dz =
-                dC_da.multiply_elementwise(&(self.activations[w_i].derivative)(&z_values[w_i])); // shape: (n_i, m)
+                dC_da.multiply_elementwise(&(self.layers[i].activation.derivative)(&z_values[i])); // shape: (n_i, m)
 
             // dz_dw = a^(L - 1)
             let dz_dw = a_values[i - 1].clone(); // shape: (n_{i-1}, m)
 
-            let dz_da = &self.weights[w_i]; // shape: (n_i, n_{i-1})
+            let dz_da = &self.weights[i]; // shape: (n_i, n_{i-1})
 
             // dC_dw = dC_dz * dz_dw
             let dC_dw_i = dC_dz.matmul(&dz_dw.transpose()); // shape: (n_i, n_{i-1})
@@ -167,19 +185,14 @@ impl NeuralNetwork {
             dC_da = dz_da.transpose().matmul(&dC_dz);
         }
 
+        // Add in placeholders again last since the order is reversed
+        dc_dw.push(Matrix::new(0, 0));
+        dc_db.push(Matrix::new(0, 0));
+
         // Reverse the gradients vector as we went through the layers backwards
         dc_dw.reverse();
         dc_db.reverse();
         return (dc_dw, dc_db);
-    }
-
-    pub fn gradient_descent(&mut self, dc_dw: Vec<Matrix>, dc_db: Vec<Matrix>, learning_rate: f64) {
-        for i in 0..self.weights.len() {
-            // w = w - dc_dw * learning_rate
-            self.weights[i] = self.weights[i].subtract(&dc_dw[i].map(|x| x * learning_rate));
-            // b = b - dc_db * learning_rate
-            self.bias[i] = self.bias[i].subtract(&dc_db[i].map(|x| x * learning_rate));
-        }
     }
 
     // Inputs and targest here should be batched
@@ -203,6 +216,8 @@ impl NeuralNetwork {
 
         let mut train_history: Vec<f64> = Vec::with_capacity(num_epochs);
         let mut validation_history: Vec<f64> = Vec::with_capacity(num_epochs);
+
+        let mut timestep = 1;
 
         for i in 0..num_epochs {
             // We run validation here first as after feeding the training data, gradient descent happens.
@@ -232,7 +247,8 @@ impl NeuralNetwork {
                     self.backpropagate(outputs, &targets[batch].transpose(), a_values, z_values);
 
                 self.optimizer
-                    .step(&dc_dw, &dc_db, &mut self.weights, &mut self.bias);
+                    .step(&dc_dw, &dc_db, &mut self.weights, &mut self.bias, timestep);
+                timestep += 1;
 
                 // self.gradient_descent(dc_dw, dc_db, learning_rate);
             }
@@ -265,18 +281,24 @@ impl NeuralNetwork {
     }
 
     pub fn load_weights_and_biases(
-        layers: Vec<usize>,
+        layers: Vec<Layer>,
         weights: Vec<Matrix>,
         biases: Vec<Matrix>,
-        activations: Vec<Activation>,
         loss_function: LossFunction,
-        optimizer: Box<dyn Optimizer>,
+        mut optimizer: Box<dyn Optimizer>,
     ) -> Self {
+        let mut weights_with_placeholder = vec![Matrix::new(0, 0)];
+        weights_with_placeholder.extend(weights);
+
+        let mut biases_with_placeholder = vec![Matrix::new(0, 0)];
+        biases_with_placeholder.extend(biases);
+
+        optimizer.initialize(&weights_with_placeholder, &biases_with_placeholder);
+
         Self {
             layers,
-            weights,
-            bias: biases,
-            activations,
+            weights: weights_with_placeholder,
+            bias: biases_with_placeholder,
             loss_function,
             optimizer,
         }
@@ -287,7 +309,7 @@ impl NeuralNetwork {
 mod tests {
     use super::*;
     use crate::{
-        activations::{RELU, SIGMOID},
+        activations::{NONE, RELU, SIGMOID},
         loss_functions::MSE,
         optimizers,
     };
@@ -334,12 +356,24 @@ mod tests {
         ];
 
         let nn = NeuralNetwork::load_weights_and_biases(
-            vec![1, 1, 1],
+            vec![
+                Layer {
+                    units: 1,
+                    activation: NONE,
+                },
+                Layer {
+                    units: 1,
+                    activation: RELU,
+                },
+                Layer {
+                    units: 1,
+                    activation: RELU,
+                },
+            ],
             weights,
             biases,
-            vec![RELU, RELU],
             MSE,
-            Box::new(optimizers::SGD::new(0.5, 0.0)),
+            Box::new(optimizers::SGD::new(0.5, None, 0.0)),
         );
 
         let input = Matrix {
@@ -411,12 +445,24 @@ mod tests {
         ];
 
         let nn = NeuralNetwork::load_weights_and_biases(
-            vec![2, 3, 2],
+            vec![
+                Layer {
+                    units: 2,
+                    activation: NONE,
+                },
+                Layer {
+                    units: 3,
+                    activation: RELU,
+                },
+                Layer {
+                    units: 2,
+                    activation: SIGMOID,
+                },
+            ],
             weights,
             biases,
-            vec![RELU, SIGMOID],
             MSE,
-            Box::new(optimizers::SGD::new(0.1, 0.0)),
+            Box::new(optimizers::SGD::new(0.1, None, 0.0)),
         );
 
         let input = Matrix {
@@ -478,10 +524,22 @@ mod tests {
         )];
 
         let mut nn = NeuralNetwork::new(
-            vec![2, 3, 1],
-            vec![RELU, SIGMOID],
+            vec![
+                Layer {
+                    units: 2,
+                    activation: NONE,
+                },
+                Layer {
+                    units: 3,
+                    activation: RELU,
+                },
+                Layer {
+                    units: 1,
+                    activation: SIGMOID,
+                },
+            ],
             MSE,
-            Box::new(optimizers::SGD::new(0.1, 0.0)),
+            Box::new(optimizers::SGD::new(0.1, None, 0.0)),
         );
 
         println!("\n=== AND Gate Test (batch_size=4) ===");
@@ -554,10 +612,22 @@ mod tests {
         )];
 
         let mut nn = NeuralNetwork::new(
-            vec![2, 3, 1],
-            vec![RELU, SIGMOID],
+            vec![
+                Layer {
+                    units: 2,
+                    activation: NONE,
+                },
+                Layer {
+                    units: 3,
+                    activation: RELU,
+                },
+                Layer {
+                    units: 1,
+                    activation: SIGMOID,
+                },
+            ],
             MSE,
-            Box::new(optimizers::SGD::new(0.5, 0.0)),
+            Box::new(optimizers::SGD::new(0.5, None, 0.0)),
         );
 
         println!("\n=== OR Gate Test (batch_size=4) ===");
@@ -620,10 +690,22 @@ mod tests {
         ];
 
         let mut nn = NeuralNetwork::new(
-            vec![1, 2, 1],
-            vec![RELU, SIGMOID],
+            vec![
+                Layer {
+                    units: 1,
+                    activation: NONE,
+                },
+                Layer {
+                    units: 2,
+                    activation: RELU,
+                },
+                Layer {
+                    units: 1,
+                    activation: SIGMOID,
+                },
+            ],
             MSE,
-            Box::new(optimizers::SGD::new(0.1, 0.0)),
+            Box::new(optimizers::SGD::new(0.1, None, 0.0)),
         );
 
         // Calculate initial cost
@@ -680,10 +762,22 @@ mod tests {
         )];
 
         let mut nn = NeuralNetwork::new(
-            vec![2, 3, 1],
-            vec![RELU, SIGMOID],
+            vec![
+                Layer {
+                    units: 2,
+                    activation: NONE,
+                },
+                Layer {
+                    units: 3,
+                    activation: RELU,
+                },
+                Layer {
+                    units: 1,
+                    activation: SIGMOID,
+                },
+            ],
             BINARY_CROSSENTROPY,
-            Box::new(optimizers::SGD::new(0.1, 0.0)),
+            Box::new(optimizers::SGD::new(0.1, None, 0.0)),
         );
 
         println!("\n=== OR Gate Test Logistic (batch_size=4) ===");

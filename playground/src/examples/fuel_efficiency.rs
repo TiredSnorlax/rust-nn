@@ -1,8 +1,8 @@
 use neural_network::{
-    activations::{LINEAR, RELU},
+    activations::{LINEAR, NONE, RELU},
     dataframe::{Dataframe, FeatureTypes},
     loss_functions::MSE,
-    nn::NeuralNetwork,
+    nn::{Layer, NeuralNetwork},
 };
 use rand::RngExt;
 
@@ -78,10 +78,26 @@ pub fn run_fuel_efficiency() {
 
     // Define neural network structure
     let mut nn = NeuralNetwork::new(
-        vec![train_x[0].cols, 64, 64, 1],
-        vec![RELU, RELU, LINEAR],
+        vec![
+            Layer {
+                units: train_x[0].cols,
+                activation: NONE,
+            },
+            Layer {
+                units: 64,
+                activation: RELU,
+            },
+            Layer {
+                units: 64,
+                activation: RELU,
+            },
+            Layer {
+                units: 1,
+                activation: LINEAR,
+            },
+        ],
         MSE,
-        Box::new(neural_network::optimizers::SGD::new(0.01, 0.)),
+        Box::new(neural_network::optimizers::SGD::new(0.01, None, 0.0)),
     );
 
     let history = nn.train(train_x, train_y, 100, 0.2);
