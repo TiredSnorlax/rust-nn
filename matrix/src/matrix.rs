@@ -357,6 +357,55 @@ impl Matrix {
         }
     }
 
+    pub fn mean(&self, axis: Option<usize>) -> Matrix {
+        if let Some(dim) = axis {
+            if dim == 0 {
+                let mut result = Vec::with_capacity(self.cols);
+                for i in 0..self.rows {
+                    let row_mean = self.data[i * self.cols..(i + 1) * self.cols]
+                        .iter()
+                        .fold(0.0, |a, b| a + b)
+                        / self.cols as f64;
+                    result.push(row_mean);
+                }
+                Matrix {
+                    rows: self.rows,
+                    cols: 1,
+                    data: result,
+                }
+            } else if dim == 1 {
+                let transposed = self.transpose();
+                let mut result = Vec::with_capacity(self.rows);
+                for i in 0..self.cols {
+                    let col_mean = transposed.data[i * self.rows..(i + 1) * self.rows]
+                        .iter()
+                        .fold(0.0, |a, b| a + b)
+                        / self.rows as f64;
+                    result.push(col_mean);
+                }
+                Matrix {
+                    rows: 1,
+                    cols: self.cols,
+                    data: result,
+                }
+            } else {
+                panic!(
+                    "Invalid axis of {} when using min on {:?} shape matrix.",
+                    dim,
+                    self.shape()
+                )
+            }
+        } else {
+            let min_val =
+                self.data.iter().fold(f64::INFINITY, |a, b| a + b) / self.data.len() as f64;
+            Matrix {
+                rows: 1,
+                cols: 1,
+                data: vec![min_val],
+            }
+        }
+    }
+
     pub fn row(&self, index: usize) -> Vec<f64> {
         self.data[index * self.cols..(index + 1) * self.cols].to_vec()
     }
